@@ -1,0 +1,25 @@
+{
+  "verdict": "NEEDS_REVIEW",
+  "transcription": "So, mitochondria is like the powerhouse of the cell, it makes ATP through oxidative phosphorylation...",
+  "feynman_score": {
+    "accuracy": 90,
+    "simplicity": 40 
+  },
+  "evaluation_proof": {
+    "jargon_used": [
+      {
+        "term": "oxidative phosphorylation",
+        "feedback": "You used a complex term without explaining what it means in plain English."
+      }
+    ],
+    "matched_concepts": [
+      {
+        "concept": "Energy production",
+        "student_quote": "it makes ATP"
+      }
+    ],
+    "missed_concepts": [
+      "You forgot to mention that it has its own DNA."
+    ]
+  }
+}
