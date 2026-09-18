@@ -2,7 +2,16 @@ const express = require("express") ;
 const cors=require("cors");
 const supabase=require("./supabase")
 const app=express();
+const path= require("path")
+const crypto= require("crypto")
 const PORT=5000;
+
+
+const MAX_FILE_SIZE=10*1024*1024; 
+
+const ALLOWED_FILE_TYPES= new Set([ 
+    "application/pdf"
+]); 
 
 app.use(cors()); 
 app.use(express.json());
@@ -126,6 +135,68 @@ app.patch("/api/sessions/:guest_id/activity", async(req,res) =>{
         expired_at: updatedSession.expired_at 
     }); 
 });
+
+
+app.post("/api/uploads/sign", async(req,res) => {
+    const { guest_id, file_name, file_type, file_size}=req.body;
+    
+    if(!guest_id || !file_name || !file_type || !file_size) {
+        return res.status(400).json({
+            error: "something is required"
+        }); 
+    }
+    if(!ALLOWED_FILE_TYPES.has(file_type)) { 
+        return res.status(415).json({
+            error: "File Type not supported"
+        });
+    }
+    if(file_size> MAX_FILE_SIZE){
+        return res.status(413).json({
+            error: "File Exceeded 10MB"
+        });
+    }
+    const {data: session, error: sessionError } = await supabase
+    .from("guest_session")
+    .select("guest_id, expired_at")
+    .eq("guest_id", guest_id)
+    .maybeSingle();
+
+    if(sessionError){
+        return res.status(500).json({
+            error:sessionError.message 
+        });
+    }
+
+     if (!session) {
+    return res.status(404).json({
+      error: "Session not found",
+    });
+  }
+    if(!session.expired_at|| new Date(session.expired_at).getTime() <= Date.now()) 
+    {
+        return res.status(410).json({
+            error: "Session Expired"
+        }); 
+    }
+
+    const extension=path.extname(file_name).toLowerCase(); 
+    const storagePath= `${guest_id}/${crypto.randomUUID()}${extension}`;
+
+    const {data:uploadData, error: uploadError} = await supabase.storage
+    .from("reviewer_upload")
+    .createSignedUploadUrl(storagePath);
+
+    if(uploadError){
+        return res.status(500).json({ error:uploadError.message});
+    }
+
+    return res.status(201).json({
+        path:storagePath,
+        token: uploadData.token,
+    });
+});
+
+
 
 app.listen(PORT, () => {
     console.log('Server running at Port {PORT}');
