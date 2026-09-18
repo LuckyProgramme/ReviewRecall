@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect,useRef, useState } from 'react'
 //import heroImg from './assets/hero.png'
 import reactLogo from './assets/react.svg'
 import viteLogo from './assets/vite.svg'
@@ -14,15 +14,29 @@ function App() {
 
   }
 
-  const [sessionID,setSessionID]=useState("");
 
+  const [sessionID,setSessionID]=useState("");
+  const sessionLoading=useRef(false);
   useEffect(()=> {
     async function loadSession(){ 
+      if (sessionLoading.current){
+        return;
+      }
+      sessionLoading.current=true;
+      
       const savedSessionID=localStorage.getItem("review_recall_session")
+
       if(savedSessionID){
+        const response= await fetch(`http://localhost:5000/api/sessions/${savedSessionID}`)
+        
+        if(response.ok){
         setSessionID(savedSessionID);
         return;        
-      }
+        } 
+        if (response.status===404 || response.status=== 410){
+            localStorage.removeItem("review_recall_session")
+        }
+     }
       const response= await fetch("http://localhost:5000/api/sessions", {
         method:"POST",
       });
@@ -34,6 +48,10 @@ function App() {
     }
     loadSession();
   }, [])
+ 
+
+  
+  
   return (
     <>
       <section id="center">
