@@ -14,6 +14,7 @@ function App() {
 
   }
 
+  
 
   const [sessionID,setSessionID]=useState("");
   const sessionLoading=useRef(false);
@@ -23,7 +24,7 @@ function App() {
         return;
       }
       sessionLoading.current=true;
-      
+
       const savedSessionID=localStorage.getItem("review_recall_session")
 
       if(savedSessionID){
@@ -48,8 +49,26 @@ function App() {
     }
     loadSession();
   }, [])
- 
+ async function recordActivity(){ 
+    if (!sessionID){ 
+      return
+    }   
 
+    const response= await fetch(
+      `http://localhost:5000/api/sessions/${sessionID}/activity`,
+      {method: "PATCH",} 
+    );
+
+      const data= await response.json();
+    
+      if(!response.ok){
+        console.error(data.error)
+        return
+      }
+
+      console.log("Session expiry extended:", data.expired_at);
+    }
+  
   
   
   return (
@@ -62,8 +81,8 @@ function App() {
             A study buddy to recall what you learned using the <b> Feynman Technique</b>
           </p>
         </div>
-        <button onClick={checkBackend}> 
-          Go to Server
+        <button onClick={recordActivity}> 
+          Check expired session
         </button>
          {backendStatus && <p>Backend status: {backendStatus}</p>}
          <p> Session: {sessionID ? sessionID: "Creating session..."}</p>

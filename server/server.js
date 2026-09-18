@@ -72,6 +72,60 @@ app.get("/api/sessions/:guest_id", async(req,res)=>{
         "expired_at": data.expired_at
      });
 });
+app.patch("/api/sessions/:guest_id/activity", async(req,res) =>{
+    const{guest_id}=req.params; 
+    const{data: session, error: findError} = await supabase
+    .from("guest_session")
+    .select("guest_id, created_at, expired_at")
+    .eq("guest_id", guest_id)
+    .maybeSingle()
+
+    if(findError){ 
+        return res.status(500).json({
+             "valid": false,
+             "error": error.message,
+        });
+    }
+
+    if(!session){ 
+        return res.status(404).json({ 
+            valid:false,
+            error: "Session not found"
+        })
+    }
+    const currentExpiry= new Date(session.expired_at).getTime(); 
+
+    if(!session.expired_at || currentExpiry<=Date.now()){
+        return res.status(410).json({
+            valid:false,
+            error: "Session expired",
+        });  
+    }
+
+    const newExpiry=new Date(Date.now()+30*60*1000).toISOString(); 
+    const{data: updatedSession, error:updatedError}=await supabase 
+    .from ("guest_session")
+    .update({ 
+        expired_at:newExpiry 
+    })
+    .eq("guest_id", guest_id)
+    .select("guest_id, created_at, expired_at")
+    .single(); 
+
+    if(updatedError){ 
+       return res.status(500),json({
+        valid:false,
+        error: updatedError.message 
+       });
+    }
+
+    return res.status(200).json({
+        valid:true,
+        guest_id: updatedSession.guest_id,
+        created_at: updatedSession.created_at,
+        expired_at: updatedSession.expired_at 
+    }); 
+});
 
 app.listen(PORT, () => {
     console.log('Server running at Port {PORT}');
