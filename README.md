@@ -1,5 +1,21 @@
 # React + TypeScript + Vite
 
+## Daily Git helper
+
+Stage, commit, and push in one command from any folder inside this repository:
+
+```powershell
+python gitpush.py all "Daily update" push
+```
+
+The final `push` argument is optional because pushing is the default. Use `all`
+or `"git add ."` to stage everything, or pass comma-separated paths to stage
+selected files and folders:
+
+```powershell
+python gitpush.py "README.md,client/src" "Update docs and UI"
+```
+
 This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
 
 Currently, two official plugins are available:
