@@ -1,3 +1,6 @@
 node_modules/ 
 .agents/ 
 Development Steps.md 
+.playwright-cli/
+Review-Recall DESIGN.md     
+File Uploader progress.md
