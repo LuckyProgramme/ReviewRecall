@@ -1,1 +1,9 @@
 node_modules/ 
+verification/
+.env
+.env.local
+.env.*.local
+dist/
+src/revised-design.md
+src/develop-client-frontend.md
+src/client-design.md
