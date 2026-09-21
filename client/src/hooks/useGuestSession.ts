@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { request, sessionGone } from '../lib/api'
-import { loadSession, parseSession, saveId, type Session } from '../lib/session'
+import { clearSession, loadSession, parseSession } from '../lib/session'
+import type { Session } from '../types/study'
 
 type SessionState =
   | { status: 'loading' | 'error' | 'expired'; session?: never }
@@ -11,10 +12,9 @@ export function useGuestSession() {
   const generation = useRef(0)
   const start = useCallback(async (fresh = false) => {
     const current = ++generation.current
-    if (fresh) saveId(null)
     setState({ status: 'loading' })
     try {
-      const session = await loadSession()
+      const session = await loadSession({ fresh })
       if (current === generation.current) setState({ status: 'ready', session })
     } catch {
       if (current === generation.current) setState({ status: 'error' })
@@ -41,7 +41,7 @@ export function useGuestSession() {
 
   const expire = useCallback(() => {
     generation.current++
-    saveId(null)
+    clearSession()
     setState({ status: 'expired' })
   }, [])
   useEffect(() => {
