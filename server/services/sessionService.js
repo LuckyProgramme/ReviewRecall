@@ -18,12 +18,21 @@ async function findSession(guestId) {
 const isExpired = (session) => !session?.expired_at || new Date(session.expired_at).getTime() <= Date.now();
 
 async function refreshSession(guestId) {
+  const now = new Date();
+  const expiredAt = new Date(now.getTime() + SESSION_DURATION_MS).toISOString();
+  const { data, error } = await supabase
+    .from("guest_session")
+    .update({ expired_at: expiredAt })
+    .eq("guest_id", guestId)
+    .gt("expired_at", now.toISOString())
+    .select(SESSION_FIELDS)
+    .maybeSingle();
+  if (error) throw error;
+  if (data) return { status: "ok", session: data };
   const session = await findSession(guestId);
   if (!session) return { status: "not_found" };
   if (isExpired(session)) return { status: "expired" };
-  const { data, error } = await supabase.from("guest_session").update({ expired_at: getExpiry() }).eq("guest_id", guestId).select(SESSION_FIELDS).single();
-  if (error) throw error;
-  return { status: "ok", session: data };
+  throw new Error("Session could not be refreshed");
 }
 
-module.exports = { createSession, findSession, isExpired, refreshSession };
+module.exports = { createSession, findSession, isExpired, refreshSession, SESSION_DURATION_MS };

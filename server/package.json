@@ -4,7 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "node -e \"require('./test/cleanup.test.js'); require('./test/domain.test.js'); require('./test/gemini.test.js'); require('./test/routes.test.js')\"",
     "dev": "nodemon server.js"
   },
   "keywords": [],
@@ -12,11 +12,15 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
+    "@google/genai": "^2.24.0",
     "@supabase/supabase-js": "^2.116.0",
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
-    "multer": "^2.4.0"
+    "multer": "^2.4.0",
+    "music-metadata": "^11.16.0",
+    "pdfjs-dist": "^6.3.289",
+    "ts-ebml": "^3.0.2"
   },
   "devDependencies": {
     "nodemon": "^3.1.14"

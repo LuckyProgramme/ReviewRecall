@@ -1,36 +1,32 @@
-import type { ApiErrorKind } from "../types/study"
-
-
 const baseUrl = (
   import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000'
 ).replace(/\/$/, '')
 
 export class ApiError extends Error {
-  readonly kind: ApiErrorKind = 'http'  
+  readonly kind = 'http' as const
   status: number
   constructor(status: number) {
     super(`Request failed with HTTP ${status}`)
-    this.name='ApiError'
+    this.name = 'ApiError'
     this.status = status
   }
 }
 
 export class NetworkError extends Error {
-  readonly kind : ApiErrorKind = 'network'  
-  
+  readonly kind = 'network' as const
+
   constructor() {
-    super(`Could not reach Network`)
-    this.name='NetworkError'
-  
+    super('Could not reach Network')
+    this.name = 'NetworkError'
   }
 }
 
-export class  ResponseError extends Error {
-  readonly kind : ApiErrorKind = 'response'  
-  
-  constructor(message:string) {
+export class ResponseError extends Error {
+  readonly kind = 'response' as const
+
+  constructor(message: string) {
     super(message)
-    this.name='ResponseError'
+    this.name = 'ResponseError'
   }
 }
 
@@ -39,17 +35,20 @@ export async function request(
   options: RequestInit = {},
 ): Promise<Record<string, unknown>> {
   let response: Response
-  try{
-    response=await fetch(`${baseUrl}${path}`,{...options, signal:options.signal ?? AbortSignal.timeout(20000)})
+  try {
+    response = await fetch(`${baseUrl}${path}`, {
+      ...options,
+      signal: options.signal ?? AbortSignal.timeout(20000),
+    })
+  } catch {
+    throw new NetworkError()
   }
-  catch{throw new NetworkError()}
 
-  
   if (!response.ok) throw new ApiError(response.status)
-  let body: unknown 
-  try{
-    body= await response.json()
-  } catch { 
+  let body: unknown
+  try {
+    body = await response.json()
+  } catch {
     throw new ResponseError('The API returned invalid JSON')
   }
 
@@ -58,8 +57,7 @@ export async function request(
   return body as Record<string, unknown>
 }
 
-export function sessionGone(error: unknown) {
- 
+export function sessionGone(error: unknown): error is ApiError {
   return (
     error instanceof ApiError && (error.status === 404 || error.status === 410)
   )

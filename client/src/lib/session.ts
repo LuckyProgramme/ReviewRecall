@@ -4,6 +4,7 @@ import type { Session } from '../types/study'
 const key = 'review_recall_session'
 let memoryId: string | null = null
 let bootstrap: Promise<Session> | null = null
+const cleanups = new Map<string, Promise<void>>()
 let sessionAttempt = 0
 
 function savedId() {
@@ -28,6 +29,23 @@ export function clearSession() {
   sessionAttempt++
   bootstrap = null
   saveId(null)
+}
+
+export function deleteExpiredSession(id: string): Promise<void> {
+  const inFlight = cleanups.get(id)
+  if (inFlight) return inFlight
+  const pending = request(`/api/sessions/${encodeURIComponent(id)}/expired`, {
+    method: 'DELETE',
+    signal: AbortSignal.timeout(60000),
+  }).then((result) => {
+    if (result.deleted !== true) throw new Error('Session cleanup was not confirmed')
+  })
+  cleanups.set(id, pending)
+  const clearCleanup = () => {
+    if (cleanups.get(id) === pending) cleanups.delete(id)
+  }
+  void pending.then(clearCleanup, clearCleanup)
+  return pending
 }
 
 export function parseSession(data: Record<string, unknown>): Session {
@@ -58,6 +76,8 @@ export function loadSession(options: { fresh?: boolean } = {}): Promise<Session>
       } catch (error) {
         if (attempt !== sessionAttempt) throw error
         if (!sessionGone(error)) throw error
+        if (error.status === 410) await deleteExpiredSession(id)
+        if (attempt !== sessionAttempt) throw error
         saveId(null)
       }
     }

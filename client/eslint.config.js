@@ -6,7 +6,8 @@ import tseslint from 'typescript-eslint'
 import { defineConfig, globalIgnores } from 'eslint/config'
 
 export default defineConfig([
-  globalIgnores(['dist']),
+  // Unused prototype requires UI packages that are not part of the shipped app.
+  globalIgnores(['dist', 'src/assets/owllogoanimation.tsx']),
   {
     files: ['**/*.{ts,tsx}'],
     extends: [

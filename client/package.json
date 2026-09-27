@@ -7,6 +7,8 @@
     "dev": "vite",
     "build": "tsc -b ../tsconfig.json && vite build",
     "lint": "eslint .",
+    "test": "node -e \"require('./session-cleanup.test.cjs'); require('./client-flow.test.cjs'); require('./recorder.test.cjs')\"",
+    "test:session": "node session-cleanup.test.cjs",
     "preview": "vite preview"
   },
   "dependencies": {
