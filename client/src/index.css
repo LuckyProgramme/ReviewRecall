@@ -43,6 +43,9 @@
     outline: 2px solid var(--color-action);
     outline-offset: 3px;
   }
+  main#main:focus {
+    outline: none;
+  }
   ::selection {
     background: var(--color-divider);
     color: var(--color-ink);

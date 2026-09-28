@@ -8,7 +8,7 @@ export function TopicChoice({ topics, busy, onChoose }: { topics: Topic[]; busy:
   return <main id="main" tabIndex={-1} className="mx-auto w-full max-w-task flex-1 py-10">
     <p className="text-xs font-semibold uppercase tracking-[0.2em] text-action">Your reviewer is ready</p>
     <h1 className="mt-3 font-display text-4xl">Choose a broad topic</h1>
-    <p className="mt-3 text-muted">Each topic holds a short queue of concepts from your PDF.</p>
+    <p className="mt-3 text-muted">Each topic holds a short queue of concepts from your study material.</p>
     <div className="mt-8 rounded-2xl border border-divider bg-paper p-6 shadow-upload">
       <label htmlFor="topic-select" className="block text-sm font-semibold">Broad topic</label>
       <select id="topic-select" value={selected} onChange={(event) => setSelected(event.target.value)} className="mt-3 min-h-12 w-full rounded-lg border border-control bg-paper px-3 text-ink">
