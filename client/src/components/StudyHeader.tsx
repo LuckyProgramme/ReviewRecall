@@ -1,6 +1,6 @@
 import reviewRecallLogo from '../assets/rr.svg'
 
-export function StudyHeader({ current = 0, expiresAt }: { current?: 0 | 1 | 2; expiresAt?: number }) {
+export function StudyHeader({ current = 0 }: { current?: 0 | 1 | 2 }) {
   const steps = ['Upload', 'Choose', 'Recall']
 
   return (
@@ -51,7 +51,6 @@ export function StudyHeader({ current = 0, expiresAt }: { current?: 0 | 1 | 2; e
           ))}
         </ol>
       </nav>
-      {expiresAt && <p className="mt-3 text-xs text-muted" aria-live="polite">Session active until {new Date(expiresAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })} after your latest study action.</p>}
     </header>
   )
 }

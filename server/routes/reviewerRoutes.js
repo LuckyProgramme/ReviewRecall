@@ -4,9 +4,14 @@ const { ApiError, requireUuid } = require("../services/apiError");
 const reviewer = require("../services/reviewerService");
 const runs = require("../services/runService");
 const attempts = require("../services/attemptService");
+const { createRawReviewer } = require("../services/rawReviewer");
 
 const router = express.Router();
 const wrap = fn => (req, res, next) => Promise.resolve(fn(req, res)).catch(next);
+
+router.post("/uploads/raw", wrap(async (req, res) => {
+  res.status(201).json(await createRawReviewer(guestHeader(req), req.body));
+}));
 
 router.post("/uploads/complete", wrap(async (req, res) => {
   const result = await reviewer.completeUpload(guestHeader(req), requireUuid(req.body?.reviewer_id, "reviewer ID"));
@@ -44,6 +49,10 @@ router.post("/topics/:topic_id/runs", wrap(async (req, res) => {
 }));
 router.get("/runs/:run_id", wrap(async (req, res) => {
   res.json({ run: await runs.runView(guestHeader(req), req.params.run_id) });
+}));
+router.post("/runs/:run_id/select", wrap(async (req, res) => {
+  res.json({ run: await runs.selectConcept(guestHeader(req), req.params.run_id,
+    requireUuid(req.body?.concept_id, "concept ID")) });
 }));
 router.post("/runs/:run_id/advance", wrap(async (req, res) => {
   res.json({ run: await runs.advance(guestHeader(req), req.params.run_id,

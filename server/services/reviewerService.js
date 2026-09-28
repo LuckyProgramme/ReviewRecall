@@ -3,6 +3,7 @@ const getAdminSupabase = require("../adminSupabase");
 const { liveGuest } = require("./guestAccess");
 const { ApiError, requireUuid } = require("./apiError");
 const { extractPdfText } = require("./pdfText");
+const { rawTextBlocks } = require("./rawReviewer");
 const { curate } = require("./curation");
 const gemini = require("./gemini");
 
@@ -114,11 +115,16 @@ async function processReviewer(reviewerId, { admin = getAdminSupabase(), extract
   heartbeat.unref?.();
   try {
     await liveGuest(row.guest_id, { admin });
-    const download = await admin.storage.from(BUCKET).download(row.file_path);
-    if (download.error || !download.data) throw Object.assign(new Error("PDF download failed"), { code: "PDF_DOWNLOAD_FAILED" });
-    const bytes = Buffer.from(await download.data.arrayBuffer());
-    if (bytes.length !== row.file_size) throw Object.assign(new Error("PDF size changed"), { code: "INVALID_UPLOAD" });
-    const extracted = await extract(bytes);
+    let extracted;
+    if (row.source_mode === "raw") {
+      extracted = rawTextBlocks(row.raw_text || "");
+    } else {
+      const download = await admin.storage.from(BUCKET).download(row.file_path);
+      if (download.error || !download.data) throw Object.assign(new Error("PDF download failed"), { code: "PDF_DOWNLOAD_FAILED" });
+      const bytes = Buffer.from(await download.data.arrayBuffer());
+      if (bytes.length !== row.file_size) throw Object.assign(new Error("PDF size changed"), { code: "INVALID_UPLOAD" });
+      extracted = await extract(bytes);
+    }
     if (!extracted.length) throw Object.assign(new Error("No extractable text"), { code: "NO_EXTRACTABLE_TEXT" });
     const oldTopics = await admin.from("topic").delete().eq("reviewer_id", reviewerId);
     if (oldTopics.error) throw oldTopics.error;

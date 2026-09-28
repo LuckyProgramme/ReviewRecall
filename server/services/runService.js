@@ -81,6 +81,22 @@ async function currentItem(guestId, runId, itemId, admin = getAdminSupabase()) {
   return run;
 }
 
+async function selectConcept(guestId, runId, conceptId, admin = getAdminSupabase()) {
+  requireUuid(conceptId, "concept ID");
+  await ownedRun(guestId, runId, admin);
+  await liveGuest(guestId, { admin, touch: true });
+  const result = await admin.rpc("select_study_concept", {
+    p_guest_id: guestId, p_run_id: runId, p_concept_id: conceptId,
+  });
+  if (result.error) throw result.error;
+  if (result.data === "attempt_in_progress") throw new ApiError(409, "ATTEMPT_IN_PROGRESS", "Finish the active recording before changing concepts");
+  if (result.data === "session_expired") throw new ApiError(410, "SESSION_EXPIRED", "Session expired");
+  if (result.data === "run_not_found" || result.data === "concept_not_found")
+    throw new ApiError(404, "CONCEPT_NOT_FOUND", "Concept not found in this study run");
+  if (result.data !== "selected") throw new Error("Unexpected concept selection result");
+  return runView(guestId, runId, admin);
+}
+
 async function advance(guestId, runId, itemId, admin = getAdminSupabase()) {
   requireUuid(itemId, "item ID");
   const run = await runView(guestId, runId, admin);
@@ -128,7 +144,7 @@ async function skip(guestId, runId, itemId, admin = getAdminSupabase()) {
 
 async function summary(guestId, runId, admin = getAdminSupabase()) {
   const run = await runView(guestId, runId, admin);
-  if (run.status !== "completed") throw new ApiError(409, "RUN_NOT_COMPLETE", "Run is not complete");
+  if (!run.items.length || run.items.some(item => !item.latest_result)) throw new ApiError(409, "RUN_NOT_COMPLETE", "Explain every concept before viewing the final review");
   const counts = { Pass: 0, Partial: 0, Fail: 0 };
   const concepts = run.items.map(item => {
     const verdict = item.latest_result?.verdict || "Fail";
@@ -139,4 +155,4 @@ async function summary(guestId, runId, admin = getAdminSupabase()) {
   return { run_id: runId, counts, concepts };
 }
 
-module.exports = { shuffle, ownedRun, runView, startRun, currentItem, advance, skip, summary };
+module.exports = { shuffle, ownedRun, runView, startRun, selectConcept, currentItem, advance, skip, summary };

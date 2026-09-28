@@ -4,6 +4,8 @@ const { ApiError, requireUuid, requireString } = require("./apiError");
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024;
 function validateFile(input) {
+  if ((input?.mode != null && input.mode !== "pdf") || input?.text != null)
+    throw new ApiError(400, "INVALID_UPLOAD_MODE", "Provide a PDF only");
   requireUuid(input?.guest_id, "guest ID");
   const idempotencyKey = requireUuid(input?.idempotency_key, "idempotency key").toLowerCase();
   const name = requireString(input?.file_name, "file name", 255);
