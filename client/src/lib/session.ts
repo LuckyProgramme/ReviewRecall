@@ -1,9 +1,11 @@
 import { request, sessionGone } from './api'
+import type { Session } from '../types/study'
 
-export type Session = { id: string; expiresAt: number }
 const key = 'review_recall_session'
 let memoryId: string | null = null
 let bootstrap: Promise<Session> | null = null
+const cleanups = new Map<string, Promise<void>>()
+let sessionAttempt = 0
 
 function savedId() {
   try {
@@ -23,6 +25,29 @@ export function saveId(id: string | null) {
   }
 }
 
+export function clearSession() {
+  sessionAttempt++
+  bootstrap = null
+  saveId(null)
+}
+
+export function deleteExpiredSession(id: string): Promise<void> {
+  const inFlight = cleanups.get(id)
+  if (inFlight) return inFlight
+  const pending = request(`/api/sessions/${encodeURIComponent(id)}/expired`, {
+    method: 'DELETE',
+    signal: AbortSignal.timeout(60000),
+  }).then((result) => {
+    if (result.deleted !== true) throw new Error('Session cleanup was not confirmed')
+  })
+  cleanups.set(id, pending)
+  const clearCleanup = () => {
+    if (cleanups.get(id) === pending) cleanups.delete(id)
+  }
+  void pending.then(clearCleanup, clearCleanup)
+  return pending
+}
+
 export function parseSession(data: Record<string, unknown>): Session {
   const id = data.session_id ?? data.guest_id
   const expiresAt =
@@ -37,9 +62,11 @@ export function parseSession(data: Record<string, unknown>): Session {
   return { id, expiresAt }
 }
 
-export function loadSession(): Promise<Session> {
+export function loadSession(options: { fresh?: boolean } = {}): Promise<Session> {
+  if (options.fresh) clearSession()
   if (bootstrap) return bootstrap
-  bootstrap = (async () => {
+  const attempt = sessionAttempt
+  const pending = (async () => {
     const id = savedId()
     if (id) {
       try {
@@ -47,17 +74,23 @@ export function loadSession(): Promise<Session> {
           await request(`/api/sessions/${encodeURIComponent(id)}`),
         )
       } catch (error) {
+        if (attempt !== sessionAttempt) throw error
         if (!sessionGone(error)) throw error
+        if (error.status === 410) await deleteExpiredSession(id)
+        if (attempt !== sessionAttempt) throw error
         saveId(null)
       }
     }
     const session = parseSession(
       await request('/api/sessions', { method: 'POST' }),
     )
-    saveId(session.id)
+    if (attempt === sessionAttempt) saveId(session.id)
     return session
-  })().finally(() => {
-    bootstrap = null
-  })
-  return bootstrap
+  })()
+  bootstrap = pending
+  const clearBootstrap = () => {
+    if (bootstrap === pending) bootstrap = null
+  }
+  void pending.then(clearBootstrap, clearBootstrap)
+  return pending
 }

@@ -23,5 +23,6 @@
     "erasableSyntaxOnly": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["client/src"]
+  "include": ["client/src"],
+  "exclude": ["client/src/assets/owllogoanimation.tsx"]
 }

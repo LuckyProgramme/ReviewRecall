@@ -1,13 +1,19 @@
 import { useEffect, useRef, useState } from 'react'
 import { Button } from '../../components/Button'
 import { StatusMessage } from '../../components/StatusMessage'
-import { useGuestSession } from '../../hooks/useGuestSession'
-import { ApiError, request, sessionGone } from '../../lib/api'
+import type { GuestSessionController } from '../../hooks/useGuestSession'
+import { ApiError, NetworkError, request, sessionGone } from '../../lib/api'
+import { loadReviewerUploads } from '../../lib/reviewer'
+import type { UploadedReviewer } from '../../lib/reviewer'
 import { uploadPdf } from '../../lib/storage'
+import { completeReviewer } from '../../lib/studyApi'
 
 type UploadState =
-  | { phase: 'idle' | 'signing' | 'uploading' | 'uploaded'; error?: never }
+  | { phase: 'idle' | 'signing' | 'uploading' | 'registering' | 'uploaded'; error?: never }
   | { phase: 'error'; error: string }
+type UploadListState =
+  | { phase: 'idle' | 'error'; sessionId: string | null }
+  | { phase: 'ready'; sessionId: string; items: UploadedReviewer[] }
 const maxSize = 10 * 1024 * 1024
 
 function fileError(files: File[]) {
@@ -27,18 +33,21 @@ function sizeLabel(bytes: number) {
     : `${(bytes / 1024 / 1024).toFixed(1)} MB`
 }
 
-export function UploadScreen() {
-  const session = useGuestSession()
+export function UploadScreen({ session, onRegistered }: { session: GuestSessionController; onRegistered: (reviewerId: string) => void }) {
   const [file, setFile] = useState<File | null>(null)
   const [validation, setValidation] = useState<string | null>(null)
   const [upload, setUpload] = useState<UploadState>({ phase: 'idle' })
   const [activityWarning, setActivityWarning] = useState(false)
+  const [uploadList, setUploadList] = useState<UploadListState>({ phase: 'idle', sessionId: null })
+  const [listRefresh, setListRefresh] = useState(0)
   const [dragging, setDragging] = useState(false)
   const input = useRef<HTMLInputElement>(null)
   const operation = useRef(0)
   const locked = useRef(false)
   const dragDepth = useRef(0)
   const liveSession = useRef(session)
+  const pendingRegistration = useRef<{ reviewerId: string; guestId: string } | null>(null)
+  const uploadIntentKey = useRef<string | null>(null)
   useEffect(() => {
     liveSession.current = session
   })
@@ -49,9 +58,32 @@ export function UploadScreen() {
     [],
   )
 
-  const busy = upload.phase === 'signing' || upload.phase === 'uploading'
+  const sessionId = session.status === 'ready' ? session.session.id : null
+  useEffect(() => {
+    if (!sessionId) return
+    let current = true
+    loadReviewerUploads(sessionId)
+      .then((items) => {
+        if (!current) return
+        setUploadList({ phase: 'ready', sessionId, items })
+      })
+      .catch((error) => {
+        if (!current) return
+        if (sessionGone(error)) {
+          liveSession.current.expire()
+          return
+        }
+        setUploadList({ phase: 'error', sessionId })
+      })
+    return () => { current = false }
+  }, [sessionId, listRefresh])
+
+  const busy = upload.phase === 'signing' || upload.phase === 'uploading' || upload.phase === 'registering'
   const expired = session.status === 'expired'
   const completed = upload.phase === 'uploaded' && !expired
+  const uploadedReviewers = uploadList.phase === 'ready' && uploadList.sessionId === sessionId
+    ? uploadList.items
+    : []
   const pickerStyle =
     busy && !expired
       ? 'border-divider bg-divider text-muted'
@@ -66,6 +98,8 @@ export function UploadScreen() {
     if (error) return
     operation.current++
     setFile(files[0])
+    pendingRegistration.current = null
+    uploadIntentKey.current = window.crypto.randomUUID()
     setUpload({ phase: 'idle' })
     setActivityWarning(false)
   }
@@ -74,6 +108,8 @@ export function UploadScreen() {
     operation.current++
     locked.current = false
     setFile(null)
+    pendingRegistration.current = null
+    uploadIntentKey.current = null
     setUpload({ phase: 'idle' })
     setValidation(null)
     setActivityWarning(false)
@@ -101,34 +137,51 @@ export function UploadScreen() {
       liveSession.current.status === 'ready' &&
       liveSession.current.session?.id === guestId &&
       liveSession.current.session.expiresAt > Date.now()
-    setUpload({ phase: 'signing' })
+    let uploading = false
+    uploadIntentKey.current ??= window.crypto.randomUUID()
+    setUpload({ phase: pendingRegistration.current?.guestId === guestId ? 'registering' : 'signing' })
     try {
+      let pending = pendingRegistration.current?.guestId === guestId ? pendingRegistration.current : null
+      if (!pending) {
       const signed = await request('/api/uploads/sign', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'X-Guest-Id': guestId },
         body: JSON.stringify({
           guest_id: guestId,
           file_name: file.name,
           file_type: file.type,
           file_size: file.size,
+          idempotency_key: uploadIntentKey.current,
         }),
       })
       if (!current()) return
       if (
         typeof signed.path !== 'string' ||
         typeof signed.token !== 'string' ||
+        typeof signed.reviewer_id !== 'string' ||
         !signed.path.startsWith(`${guestId}/`) ||
         !signed.token
       )
         throw new Error('Invalid upload permission')
+      uploading = true
       setUpload({ phase: 'uploading' })
       await uploadPdf(signed.path, signed.token, file)
       if (!current()) return
+      pending = { reviewerId: signed.reviewer_id, guestId }
+      pendingRegistration.current = pending
+      }
+      setUpload({ phase: 'registering' })
+      await completeReviewer(guestId, pending.reviewerId)
+      if (!current()) return
       setUpload({ phase: 'uploaded' })
+      pendingRegistration.current = null
+      onRegistered(pending.reviewerId)
       try {
         await session.recordActivity(guestId)
       } catch {
         if (current()) setActivityWarning(true)
+      } finally {
+        if (id === operation.current) setListRefresh((value) => value + 1)
       }
     } catch (error) {
       if (!current()) return
@@ -139,10 +192,17 @@ export function UploadScreen() {
       }
       setUpload({
         phase: 'error',
-        error:
-          error instanceof ApiError && error.status === 400
+        error: pendingRegistration.current
+          ? 'The PDF uploaded, but registration did not finish. Retry to continue without uploading it again.'
+          : uploading
+          ? 'Storage could not finish the upload. Your file is still selected. Try again.'
+          : error instanceof ApiError && error.status === 400
             ? 'This file could not be accepted. Choose a valid PDF and try again.'
-            : 'Upload did not finish. Your file is still selected. Try again.',
+            : error instanceof ApiError && error.status >= 500
+              ? 'The upload service is unavailable. Your file is still selected. Try again.'
+              : error instanceof NetworkError
+                ? 'Could not reach the upload service. Check your connection and try again.'
+                : 'Could not prepare the upload. Your file is still selected. Try again.',
       })
     } finally {
       if (id === operation.current) locked.current = false
@@ -150,7 +210,7 @@ export function UploadScreen() {
   }
 
   return (
-    <main id="main" className="mx-auto w-full max-w-upload flex-1 pb-14 pt-9 sm:pt-10">
+    <main id="main" tabIndex={-1} className="mx-auto w-full max-w-upload flex-1 pb-14 pt-9 sm:pt-10">
       <section aria-labelledby="upload-title">
         <div
           data-testid="drop-zone"
@@ -209,7 +269,7 @@ export function UploadScreen() {
             <label
               className={`relative inline-flex min-h-11 items-center justify-center rounded-full border px-8 py-3 text-xs font-semibold tracking-[0.12em] uppercase shadow-sm transition-colors motion-reduce:transition-none ${pickerStyle}`}
             >
-              {file ? 'Select another' : 'Select PDF'}
+              {file || uploadedReviewers.length ? 'Select another' : 'Select PDF'}
               <input
                 ref={input}
                 type="file"
@@ -269,26 +329,37 @@ export function UploadScreen() {
             )}
             {expired && (
               <div>
-                <StatusMessage error>Your study session has expired. Start a new session to upload a reviewer.</StatusMessage>
-                <Button
-                  variant="secondary"
-                  className="mt-3"
-                  onClick={() => {
-                    remove()
-                    void session.restart()
-                  }}
-                >
-                  Start a new session
-                </Button>
+                <StatusMessage error>
+                  {session.cleanup === 'pending'
+                    ? 'Your session expired. Removing its uploaded files…'
+                    : session.cleanup === 'failed'
+                      ? 'Your session expired, but its uploaded files could not be removed. Try again.'
+                      : 'Your session expired and its uploaded files were removed. Start a new session to continue.'}
+                </StatusMessage>
+                {session.cleanup === 'failed' && (
+                  <Button variant="secondary" className="mt-3" onClick={session.retryCleanup}>
+                    Retry cleanup
+                  </Button>
+                )}
+                {session.cleanup === 'done' && (
+                  <Button
+                    variant="secondary"
+                    className="mt-3"
+                    onClick={() => void session.restart()}
+                  >
+                    Start a new session
+                  </Button>
+                )}
               </div>
             )}
             {!expired && upload.phase === 'signing' && <StatusMessage>Preparing your upload…</StatusMessage>}
             {!expired && upload.phase === 'uploading' && <StatusMessage>Uploading reviewer…</StatusMessage>}
+            {!expired && upload.phase === 'registering' && <StatusMessage>Registering reviewer…</StatusMessage>}
             {!expired && upload.phase === 'error' && <StatusMessage error>{upload.error}</StatusMessage>}
-            {completed && (
+            {completed && !uploadedReviewers.length && (
               <div>
                 <p role="status" className="font-medium text-ink">Reviewer uploaded</p>
-                <p className="mt-2 text-sm leading-relaxed text-muted">Your PDF is uploaded. Concept selection is not available yet.</p>
+                <p className="mt-2 text-sm leading-relaxed text-muted">Your PDF is uploaded. Reading the text and preparing concepts.</p>
               </div>
             )}
             {activityWarning && !expired && (
@@ -312,7 +383,7 @@ export function UploadScreen() {
                 Retry connection
               </Button>
             )}
-            {session.status === 'ready' && upload.phase === 'idle' && !validation && (
+            {session.status === 'ready' && upload.phase === 'idle' && !validation && !uploadedReviewers.length && (
               <p className="text-sm text-muted">{file ? 'Ready when you are.' : 'Choose a file to begin.'}</p>
             )}
           </div>
@@ -326,10 +397,43 @@ export function UploadScreen() {
               {busy && (
                 <span aria-hidden="true" className="size-4 animate-spin rounded-full border-2 border-current border-r-transparent motion-reduce:animate-none" />
               )}
-              {busy ? 'Uploading reviewer…' : upload.phase === 'error' ? 'Try upload again' : 'Use this reviewer'}
+              {busy ? upload.phase === 'registering' ? 'Registering reviewer…' : 'Uploading reviewer…' : upload.phase === 'error' ? 'Try again' : 'Use this reviewer'}
             </Button>
           )}
         </div>
+        {sessionId && uploadList.phase === 'error' && uploadList.sessionId === sessionId && (
+          <div className="mt-5 text-center">
+            <StatusMessage error>Could not load your uploaded reviewers.</StatusMessage>
+            <Button
+              variant="utility"
+              className="mt-2"
+              onClick={() => setListRefresh((value) => value + 1)}
+            >
+              Retry list
+            </Button>
+          </div>
+        )}
+        {uploadedReviewers.length > 0 && (
+          <div className="mt-8 rounded-2xl border border-divider bg-paper p-4 shadow-upload sm:p-6">
+            <h2 className="font-display text-xl text-ink">Uploaded reviewers</h2>
+            <p className="mt-1 text-sm text-muted">Saved in this study session.</p>
+            <ul className="mt-5 divide-y divide-divider border-t border-divider">
+              {uploadedReviewers.map((reviewer) => (
+                <li key={reviewer.path} className="flex items-start justify-between gap-4 py-4">
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-ink [overflow-wrap:anywhere]">{reviewer.name}</p>
+                    <p className="mt-1 text-xs text-muted">
+                      PDF document
+                      {reviewer.size !== null ? ` · ${sizeLabel(reviewer.size)}` : ''}
+                      {reviewer.uploadedAt ? ` · ${new Date(reviewer.uploadedAt).toLocaleString()}` : ''}
+                    </p>
+                  </div>
+                  <span className="shrink-0 rounded-full bg-canvas px-3 py-1 text-xs font-medium text-action">Uploaded</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
       </section>
 
       <figure className="mx-auto mt-12 max-w-md text-center text-muted sm:mt-14">

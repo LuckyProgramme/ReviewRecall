@@ -1,6 +1,6 @@
 import reviewRecallLogo from '../assets/rr.svg'
 
-export function StudyHeader() {
+export function StudyHeader({ current = 0, expiresAt }: { current?: 0 | 1 | 2; expiresAt?: number }) {
   const steps = ['Upload', 'Choose', 'Recall']
 
   return (
@@ -35,14 +35,14 @@ export function StudyHeader() {
                 </svg>
               )}
               <span
-                aria-current={index === 0 ? 'step' : undefined}
+                aria-current={index === current ? 'step' : undefined}
                 className={
-                  index === 0
+                  index === current
                     ? 'inline-flex min-h-7 items-center gap-2 rounded-full bg-action px-3.5 text-paper'
                     : 'text-muted/60'
                 }
               >
-                {index === 0 && (
+                {index === current && (
                   <span aria-hidden="true" className="size-1.5 rounded-full bg-paper" />
                 )}
                 {step}
@@ -51,6 +51,7 @@ export function StudyHeader() {
           ))}
         </ol>
       </nav>
+      {expiresAt && <p className="mt-3 text-xs text-muted" aria-live="polite">Session active until {new Date(expiresAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })} after your latest study action.</p>}
     </header>
   )
 }
