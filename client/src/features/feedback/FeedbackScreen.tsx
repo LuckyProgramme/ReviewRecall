@@ -23,6 +23,6 @@ export function FeedbackScreen({ item, attempt, last, busy, onRetry, onNext }: {
       {!!item.reference.source_locations?.length && <p className="mt-5 text-sm text-muted">Source: {item.reference.source_locations.map(({ page, heading }) => `page ${page}${heading ? `, ${heading}` : ''}`).join('; ')}</p>}
       {!!item.reference.source_passages?.length && <details className="mt-5 border-t border-divider pt-5"><summary className="cursor-pointer text-sm font-semibold">Read supporting source passages</summary><ul className="mt-4 space-y-4">{item.reference.source_passages.map((passage) => <li key={passage.block_id} className="rounded-lg bg-canvas p-4 text-sm"><p className="font-semibold">Page {passage.page}{passage.heading ? ` · ${passage.heading}` : ''}</p><p className="mt-2 whitespace-pre-wrap leading-relaxed">{passage.text}</p></li>)}</ul></details>}
     </section>
-    <div className="mt-7 flex flex-wrap gap-3"><Button variant="secondary" disabled={busy} onClick={onRetry}>Try this concept again</Button><Button disabled={busy} onClick={onNext}>{busy ? 'Saving progress…' : last ? 'See final review' : 'Next concept'}</Button></div>
+    <div className="mt-7 flex flex-wrap gap-3"><Button variant="secondary" disabled={busy} onClick={onRetry}>Try this concept again</Button><Button disabled={busy} onClick={onNext}>{busy ? 'Saving progress…' : last ? 'See final review' : 'Choose another concept'}</Button></div>
   </main>
 }

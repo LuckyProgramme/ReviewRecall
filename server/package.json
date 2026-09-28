@@ -4,7 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "node -e \"require('./test/cleanup.test.js'); require('./test/domain.test.js'); require('./test/gemini.test.js'); require('./test/routes.test.js'); require('./services/rawReviewer.test.js')\"",
+    "test": "node -e \"require('./test/cleanup.test.js'); require('./test/domain.test.js'); require('./test/gemini.test.js'); require('./test/routes.test.js'); require('./services/rawReviewer.test.js'); require('./services/selection.test.js')\"",
     "dev": "nodemon server.js"
   },
   "keywords": [],

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Button } from './components/Button'
 import { StudyHeader } from './components/StudyHeader'
-import { ConceptScreen, TopicChoice } from './features/concepts/TopicScreen'
+import { TopicSelection } from './features/concepts/TopicScreen'
 import { FeedbackScreen } from './features/feedback/FeedbackScreen'
 import { FinalReviewScreen } from './features/feedback/FinalReviewScreen'
 import { RecallScreen } from './features/recall/RecallScreen'
@@ -11,7 +11,7 @@ import type { Clip } from './hooks/useRecallRecorder'
 import { ApiError, sessionGone } from './lib/api'
 import { uploadAudio } from './lib/storage'
 import { currentRunPhase, isCurrentGeneration } from './lib/studyFlow'
-import { advanceRun, cancelAttempt, completeAttempt, completeReviewer, getAttempt, getRun, getSummary, listReviewers, listTopics, reviewerStatus, signAttempt, skipItem, startRun } from './lib/studyApi'
+import { cancelAttempt, completeAttempt, completeReviewer, getAttempt, getRun, getSummary, listReviewers, listTopics, reviewerStatus, signAttempt, selectRunConcept, startRun } from './lib/studyApi'
 import type { Attempt, ReviewerStatus, RunSummary, StudyRun, Topic } from './types/study'
 
 type Context = { reviewerId: string; topics: Topic[] }
@@ -21,7 +21,7 @@ type View =
   | { phase: 'processing'; reviewerId: string; status: ReviewerStatus; errorCode?: string; retryable?: boolean; networkIssue?: boolean }
   | { phase: 'topics'; context: Context }
   | { phase: 'concept' | 'feedback'; active: Active; attempt?: Attempt }
-  | { phase: 'record'; active: Active; revision: number; busy: boolean; notice?: string; attemptId?: string }
+  | { phase: 'record'; active: Active; revision: number; busy: boolean; notice?: string; attemptId?: string; transcript?: string }
   | { phase: 'summary'; active: Active; summary: RunSummary }
   | { phase: 'error'; message: string; retry: () => void }
 
@@ -58,6 +58,7 @@ export default function App() {
   const [viewOwner, setViewOwner] = useState<string | null>(null)
   const [actionBusy, setActionBusy] = useState(false)
   const generation = useRef(0)
+  const selectionLock = useRef(false)
   const uploadAttempt = useRef<{ attemptId: string; path: string; token: string; uploaded: boolean; itemId: string } | null>(null)
   const guestId = session.status === 'ready' ? session.session.id : null
 
@@ -177,7 +178,7 @@ export default function App() {
           return
         }
         const label = attempt.status === 'evaluating' ? 'Comparing your explanation…' : attempt.status === 'transcribing' ? 'Transcribing your explanation…' : 'Preparing audio feedback…'
-        setView((current) => current.phase === 'record' && current.attemptId === attemptId ? { ...current, notice: label } : current)
+        setView((current) => current.phase === 'record' && current.attemptId === attemptId ? { ...current, notice: label, transcript: attempt.transcript } : current)
       } catch (error) {
         if (cancelled) return
         if (sessionGone(error)) { session.expire(); return }
@@ -214,58 +215,61 @@ export default function App() {
       if (isCurrentGeneration(generation.current, token)) handleError(error, 'Could not retry AI processing. Check your connection and try again.', () => void retryReviewer(reviewerId))
     } finally { setActionBusy(false) }
   }
-  async function choose(topicId: string, context: Context) {
-    if (!guestId || actionBusy) return
+  async function choose(topicId: string, conceptId: string, context: Context) {
+    if (!guestId || actionBusy || selectionLock.current) return
     const token = generation.current
-    const topic = context.topics.find((value) => value.topic_id === topicId)
+    const topic = context.topics.find(value => value.topic_id === topicId)
     if (!topic) return
+    selectionLock.current = true
     setActionBusy(true)
     try {
       let run = await startRun(guestId, topicId)
       if (!isCurrentGeneration(generation.current, token)) return
-      save(guestId, { reviewerId: context.reviewerId, topicId })
-      refreshActivity(guestId)
-      if (run.status === 'completed') { const active = { ...context, topic, run }; const summary = await getSummary(guestId, run.run_id); if (isCurrentGeneration(generation.current, token)) setView({ phase: 'summary', active, summary }); return }
-      let item = run.items.find((value) => value.item_id === run.current_item_id)
-      if (item?.pending_attempt_id && item.pending_attempt_status === 'awaiting_upload') {
-        try { await completeAttempt(guestId, item.pending_attempt_id) }
+      // Resume an outstanding evaluation before moving the server cursor.
+      let pending = run.items.find(value => value.pending_attempt_id)
+      if (pending?.pending_attempt_id && pending.pending_attempt_status === 'awaiting_upload') {
+        try { await completeAttempt(guestId, pending.pending_attempt_id) }
         catch (error) {
           if (!(error instanceof ApiError) || ![400, 409].includes(error.status)) throw error
-          await cancelAttempt(guestId, item.pending_attempt_id)
+          await cancelAttempt(guestId, pending.pending_attempt_id)
         }
         run = await getRun(guestId, run.run_id)
         if (!isCurrentGeneration(generation.current, token)) return
-        item = run.items.find((value) => value.item_id === run.current_item_id)
+        pending = run.items.find(value => value.pending_attempt_id)
       }
-      const active = { ...context, topic, run }
-      if (item?.pending_attempt_id) setView({ phase: 'record', active, revision: 0, busy: true, attemptId: item.pending_attempt_id, notice: 'Your explanation is being processed…' })
-      else setView({ phase: currentRunPhase(run) === 'feedback' ? 'feedback' : 'concept', active })
-    } catch (error) { if (isCurrentGeneration(generation.current, token)) handleError(error, 'Could not open this topic. Try again.', () => void choose(topicId, context)) }
-    finally { setActionBusy(false) }
-  }
-  async function skip(active: Active) {
-    if (!guestId || !active.run.current_item_id || actionBusy) return
-    const token = generation.current
-    setActionBusy(true)
-    try {
-      const run = await skipItem(guestId, active.run.run_id, active.run.current_item_id)
-      if (isCurrentGeneration(generation.current, token)) { refreshActivity(guestId); setView({ phase: 'feedback', active: { ...active, run } }) }
-    } catch (error) { if (isCurrentGeneration(generation.current, token)) handleError(error, 'Could not save the skip. Try again.', () => void skip(active)) }
-    finally { setActionBusy(false) }
+      if (pending?.pending_attempt_id) {
+        const active = { ...context, topic, run }
+        setView({ phase: 'record', active, revision: 0, busy: true, attemptId: pending.pending_attempt_id,
+          notice: 'Finishing your previous explanation...' })
+        return
+      }
+      run = await selectRunConcept(guestId, run.run_id, conceptId)
+      if (!isCurrentGeneration(generation.current, token)) return
+      save(guestId, { reviewerId: context.reviewerId, topicId })
+      refreshActivity(guestId)
+      uploadAttempt.current = null
+      setView({ phase: 'record', active: { ...context, topic, run }, revision: 0, busy: false })
+    } catch (error) {
+      if (isCurrentGeneration(generation.current, token)) handleError(error,
+        'Could not open this concept. Try again.', () => void choose(topicId, conceptId, context))
+    } finally { selectionLock.current = false; setActionBusy(false) }
   }
   async function next(active: Active) {
-    if (!guestId || !active.run.current_item_id || actionBusy) return
+    if (!guestId || actionBusy) return
     const token = generation.current
     setActionBusy(true)
     try {
-      const run = await advanceRun(guestId, active.run.run_id, active.run.current_item_id)
+      const run = await getRun(guestId, active.run.run_id)
       if (!isCurrentGeneration(generation.current, token)) return
-      refreshActivity(guestId)
-      const updated = { ...active, run }
-      if (run.status === 'completed') { const summary = await getSummary(guestId, run.run_id); if (isCurrentGeneration(generation.current, token)) setView({ phase: 'summary', active: updated, summary }) }
-      else setView({ phase: currentRunPhase(run) === 'feedback' ? 'feedback' : 'concept', active: updated })
-    } catch (error) { if (isCurrentGeneration(generation.current, token)) handleError(error, 'Could not advance the concept queue. Try again.', () => void next(active)) }
-    finally { setActionBusy(false) }
+      if (run.items.length && run.items.every(item => item.latest_result)) {
+        const summary = await getSummary(guestId, run.run_id)
+        if (isCurrentGeneration(generation.current, token)) setView({ phase: 'summary', active: { ...active, run }, summary })
+      } else {
+        setView({ phase: 'concept', active: { ...active, run } })
+      }
+    } catch (error) {
+      if (isCurrentGeneration(generation.current, token)) handleError(error, 'Could not load your progress. Try again.', () => void next(active))
+    } finally { setActionBusy(false) }
   }
   async function submit(clip: Clip, current: Extract<View, { phase: 'record' }>) {
     if (!guestId || !current.active.run.current_item_id || current.busy) return
@@ -364,10 +368,19 @@ export default function App() {
       {view.phase === 'loading' && <main id="main" tabIndex={-1} className="mx-auto w-full max-w-task flex-1 py-12" role="status">Restoring your study session…</main>}
       {view.phase === 'upload' && <UploadScreen key={session.session.id} session={session} onRegistered={(reviewerId) => { save(session.session.id, { reviewerId }); setView({ phase: 'processing', reviewerId, status: 'queued' }) }} />}
       {view.phase === 'processing' && <main id="main" tabIndex={-1} className="mx-auto w-full max-w-task flex-1 py-10"><h1 className="font-display text-4xl">Preparing your reviewer</h1><div className="mt-8 rounded-2xl border border-divider bg-paper p-6 shadow-upload" role="status"><p>{view.status === 'extracting' ? 'Reading your study material…' : view.status === 'generating' ? 'Preparing source-backed concepts…' : view.status === 'failed' ? failureMessage(view.errorCode) : view.status === 'awaiting_upload' ? 'The PDF upload was not completed.' : 'Waiting to read your study material…'}</p>{view.networkIssue && view.status !== 'failed' && <p className="mt-3 text-sm text-danger">Connection interrupted. Your reviewer is still saved, and we are retrying the status check.</p>}{view.status === 'failed' && view.retryable !== false && retryableReviewerCodes.has(view.errorCode || '') && <Button className="mt-5" disabled={actionBusy} onClick={() => void retryReviewer(view.reviewerId)}>Retry processing</Button>}{(view.status === 'failed' || view.status === 'awaiting_upload') && <Button className="mt-5 ml-3" onClick={() => setView({ phase: 'upload' })}>Use different study material</Button>}</div></main>}
-      {view.phase === 'topics' && <TopicChoice topics={view.context.topics} busy={actionBusy} onChoose={(id) => void choose(id, view.context)} />}
-      {view.phase === 'concept' && <ConceptScreen key={item?.item_id} guestId={session.session.id} reviewerId={view.active.reviewerId} topic={view.active.topic} run={view.active.run} busy={actionBusy} onExplain={() => { uploadAttempt.current = null; setView({ phase: 'record', active: view.active, revision: 0, busy: false }) }} onSkip={() => void skip(view.active)} />}
-      {view.phase === 'record' && <RecallScreen key={`${item?.item_id}-${view.revision}`} conceptName={item?.concept_name ?? 'this concept'} submitting={view.busy} notice={view.notice} onSubmit={(clip) => void submit(clip, view)} onDiscard={() => abandonRecording(view)} onBack={async () => { const abandoned = await abandonRecording(view); if (abandoned) setView({ phase: 'concept', active: view.active }); return abandoned }} />}
-      {view.phase === 'feedback' && item && <FeedbackScreen item={item} attempt={view.attempt} last={view.active.run.current_index === view.active.run.items.length - 1} busy={actionBusy} onRetry={() => { uploadAttempt.current = null; setView({ phase: 'record', active: view.active, revision: 0, busy: false }) }} onNext={() => void next(view.active)} />}
+      {(view.phase === 'topics' || view.phase === 'concept' || view.phase === 'record' || view.phase === 'feedback' || view.phase === 'summary') && <TopicSelection
+        key={view.phase === 'topics' ? view.context.reviewerId : view.active.reviewerId}
+        guestId={session.session.id}
+        topics={view.phase === 'topics' ? view.context.topics : view.active.topics}
+        initialTopicId={view.phase === 'topics' ? undefined : view.active.topic.topic_id}
+        initialConceptId={item?.concept_id}
+        busy={actionBusy} recording={view.phase === 'record'} hidden={view.phase === 'feedback' || view.phase === 'summary'} onExpired={session.expire}
+        onExplain={(topicId, conceptId) => void choose(topicId, conceptId, view.phase === 'topics' ? view.context : view.active)}
+        onReupload={() => setView({ phase: 'upload' })} />}
+      {view.phase === 'record' && <RecallScreen key={`${item?.item_id}-${view.revision}`} conceptName={item?.concept_name ?? 'this concept'} submitting={view.busy} notice={view.notice} transcript={view.transcript}
+        onSubmit={(clip) => void submit(clip, view)} onDiscard={() => abandonRecording(view)}
+        onBack={async () => { const abandoned = await abandonRecording(view); if (abandoned) setView({ phase: 'concept', active: view.active }); return abandoned }} />}
+      {view.phase === 'feedback' && item && <FeedbackScreen item={item} attempt={view.attempt} last={view.active.run.items.every(value => !!value.latest_result)} busy={actionBusy} onRetry={() => { uploadAttempt.current = null; setView({ phase: 'record', active: view.active, revision: 0, busy: false }) }} onNext={() => void next(view.active)} />}
       {view.phase === 'summary' && <FinalReviewScreen summary={view.summary} onNewTopic={() => { save(session.session.id, { reviewerId: view.active.reviewerId }); setView({ phase: 'topics', context: view.active }) }} />}
       {view.phase === 'error' && <main id="main" tabIndex={-1} className="mx-auto w-full max-w-task flex-1 py-10"><h1 className="font-display text-4xl">Could not continue</h1><p role="alert" className="mt-5">{view.message}</p><Button className="mt-5" onClick={view.retry}>Retry</Button></main>}
     </>}

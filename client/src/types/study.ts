@@ -13,6 +13,7 @@ export type Reference = {
   source_passages?: Array<{ block_id: string; page: number; heading?: string; text: string; claim_kinds: string[] }>
 }
 export type Verdict = 'Pass' | 'Partial' | 'Fail'
+export type Concept = { concept_id: string; name: string; reference: Reference }
 export type EvaluationDetails = {
   matched_idea_ids: string[]
   missing_idea_ids: string[]

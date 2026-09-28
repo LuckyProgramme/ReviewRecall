@@ -9,6 +9,7 @@
     "lint": "eslint .",
     "test": "node -e \"require('./session-cleanup.test.cjs'); require('./client-flow.test.cjs'); require('./recorder.test.cjs')\"",
     "test:session": "node session-cleanup.test.cjs",
+    "test:selection": "node --test qa/conceptDeck.test.mjs qa/slotSoundSynthesizer.test.mjs",
     "preview": "vite preview"
   },
   "dependencies": {

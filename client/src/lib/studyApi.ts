@@ -1,5 +1,5 @@
 import { request, ResponseError } from './api'
-import type { Attempt, Reviewer, ReviewerStatus, RunSummary, StudyRun, Topic } from '../types/study'
+import type { Attempt, Concept, Reviewer, ReviewerStatus, RunSummary, StudyRun, Topic } from '../types/study'
 
 const object = (value: unknown): Record<string, unknown> => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new ResponseError('The service returned unexpected data.')
@@ -44,6 +44,18 @@ export async function startRun(guestId: string, topicId: string): Promise<StudyR
 }
 export async function getRun(guestId: string, runId: string): Promise<StudyRun> {
   const row = await studyRequest(guestId, `/api/runs/${id(runId)}`)
+  return parseRun(row.run)
+}
+export async function listConcepts(guestId: string, topicId: string): Promise<Concept[]> {
+  const row = await studyRequest(guestId, `/api/topics/${id(topicId)}/concepts`)
+  return array<Concept>(row.concepts).map((concept) => {
+    if (typeof concept?.concept_id !== 'string' || typeof concept.name !== 'string' || !concept.reference)
+      throw new ResponseError('Invalid concept.')
+    return concept
+  })
+}
+export async function selectRunConcept(guestId: string, runId: string, conceptId: string): Promise<StudyRun> {
+  const row = await studyRequest(guestId, `/api/runs/${id(runId)}/select`, json({ concept_id: conceptId }))
   return parseRun(row.run)
 }
 export async function advanceRun(guestId: string, runId: string, itemId: string): Promise<StudyRun> {

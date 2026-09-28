@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 export type Clip = { blob: Blob; seconds: number; url: string }
-type CaptureState = { phase: 'idle' | 'requesting' | 'recording' | 'ready' | 'error'; clip?: Clip; secondsLeft: number; error?: string }
+type CaptureState = { phase: 'idle' | 'requesting' | 'recording' | 'finalizing' | 'ready' | 'error'; clip?: Clip; secondsLeft: number; error?: string }
 const maxSeconds = 60
 
 export function createFinalizer() {
@@ -20,6 +20,7 @@ export function useRecallRecorder() {
   const timer = useRef<number | null>(null)
   const deadline = useRef(0)
   const started = useRef(0)
+  const stopped = useRef(0)
   const generation = useRef(0)
   const clipUrl = useRef<string | null>(null)
 
@@ -46,7 +47,11 @@ export function useRecallRecorder() {
   }, [])
 
   const stop = useCallback(() => {
-    if (recorder.current?.state === 'recording') recorder.current.stop()
+    if (recorder.current?.state === 'recording') {
+      stopped.current = Date.now()
+      recorder.current.stop()
+      setState(previous => ({ ...previous, phase: 'finalizing' }))
+    }
   }, [])
   const start = useCallback(async () => {
     if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
@@ -82,9 +87,9 @@ export function useRecallRecorder() {
         setState({ phase: 'error', secondsLeft: maxSeconds, error: 'Recording failed. Please try again.' })
       }
       active.onstop = () => {
-        stopTracks()
         if (token !== generation.current || !finalize()) return
-        const seconds = Math.max(0, (Date.now() - started.current) / 1000)
+        stopTracks()
+        const seconds = Math.max(0.01, ((stopped.current || Date.now()) - started.current) / 1000)
         const blob = new Blob(chunks, { type: preferred.split(';')[0] })
         if (!blob.size) {
           setState({ phase: 'error', secondsLeft: maxSeconds, error: 'No audio was captured. Please record again.' })
@@ -95,13 +100,18 @@ export function useRecallRecorder() {
         setState({ phase: 'ready', secondsLeft: 0, clip: { blob, seconds, url } })
       }
       active.start(250)
+      stopped.current = 0
       started.current = Date.now()
       deadline.current = started.current + maxSeconds * 1000
       setState({ phase: 'recording', secondsLeft: maxSeconds })
       timer.current = window.setInterval(() => {
         const remaining = Math.max(0, Math.ceil((deadline.current - Date.now()) / 1000))
         setState((previous) => previous.phase === 'recording' ? { ...previous, secondsLeft: remaining } : previous)
-        if (remaining === 0 && active.state === 'recording') active.stop()
+        if (remaining === 0 && active.state === 'recording') {
+          stopped.current = Date.now()
+          active.stop()
+          setState(previous => ({ ...previous, phase: 'finalizing' }))
+        }
       }, 250)
     } catch (error) {
       if (token !== generation.current) return

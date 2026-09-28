@@ -50,6 +50,10 @@ router.post("/topics/:topic_id/runs", wrap(async (req, res) => {
 router.get("/runs/:run_id", wrap(async (req, res) => {
   res.json({ run: await runs.runView(guestHeader(req), req.params.run_id) });
 }));
+router.post("/runs/:run_id/select", wrap(async (req, res) => {
+  res.json({ run: await runs.selectConcept(guestHeader(req), req.params.run_id,
+    requireUuid(req.body?.concept_id, "concept ID")) });
+}));
 router.post("/runs/:run_id/advance", wrap(async (req, res) => {
   res.json({ run: await runs.advance(guestHeader(req), req.params.run_id,
     requireUuid(req.body?.item_id, "item ID")) });
